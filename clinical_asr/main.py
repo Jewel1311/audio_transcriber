@@ -119,7 +119,11 @@ async def transcribe(websocket: WebSocket) -> None:
                         return
                     if not await send_json(websocket, TranscriptEvent(type="session_finished", session_id=session_id).to_dict()):
                         return
-                    break
+                    await run_backend(backend.reset)
+                    speech_started = False
+                    audio_bytes = 0
+                    audio_chunks = 0
+                    continue
                 else:
                     continue
             if text:
