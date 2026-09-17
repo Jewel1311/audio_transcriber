@@ -32,7 +32,7 @@
     <button id="loadModel">Load model</button>
     <button id="start" disabled>Start recording</button>
     <!-- <button id="demo" class="secondary" disabled>Use demo phrase</button> -->
-    <button id="finish" disabled>Finalize</button>
+    <button id="finish" disabled>Stop recording</button>
   </div>
   <section id="activity" aria-live="polite">
     <div class="metric"><small>Model</small><strong id="modelState">Not connected</strong></div>
@@ -129,8 +129,7 @@
         status.textContent = 'Model ready; start recording when ready';
         loadModel.disabled = true;
         start.disabled = false;
-        demo.disabled = false;
-        finish.disabled = false;
+        finish.disabled = true;
       }
       if (event.type === 'audio_received') { audioState.textContent = event.text; inferenceState.textContent = 'Receiving audio'; }
       if (event.type === 'partial_transcript') transcript.textContent = event.text || 'Listening...';
@@ -138,7 +137,7 @@
       if (event.type === 'partial_transcript') { inferenceState.textContent = `Partial at ${new Date().toLocaleTimeString()}`; }
       if (event.type === 'final_transcript') { inferenceState.textContent = 'Final transcript ready'; }
       if (event.type === 'error') { stopLoadingTimer(); modelState.textContent = 'Failed'; status.textContent = `ASR error: ${event.error}`; }
-      if (event.type === 'session_finished') { status.textContent = 'Finished'; stopMicrophone(); demo.disabled = true; finish.disabled = true; }
+      if (event.type === 'session_finished') { status.textContent = 'Finished'; stopMicrophone(); finish.disabled = true; }
     };
     socket.onerror = () => { status.textContent = 'WebSocket connection error'; };
     socket.onclose = () => {
@@ -146,7 +145,6 @@
       modelReady = false;
       loadModel.disabled = false;
       start.disabled = true;
-      demo.disabled = true;
       finish.disabled = true;
     };
   }
@@ -168,6 +166,7 @@
         source.connect(processor);
         processor.connect(audioContext.destination);
         status.textContent = `Listening (${audioContext.sampleRate} Hz microphone -> 16 kHz PCM)`;
+        finish.disabled = false;
       } catch (error) {
         status.textContent = `Microphone error: ${error.message}`;
         stopMicrophone();
@@ -176,8 +175,11 @@
   }
   loadModel.onclick = () => connect();
   start.onclick = startRecording;
-  demo.onclick = () => socket.send(JSON.stringify({ type: 'mock_text', text: 'Patient takes ram a pro five milligrams once daily' }));
-  finish.onclick = () => { stopMicrophone(); if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'finalize' })); };
+  finish.onclick = () => {
+    stopMicrophone();
+    finish.disabled = true;
+    if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'finalize' }));
+  };
 </script>
 </body>
 </html>
