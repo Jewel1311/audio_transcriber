@@ -26,11 +26,12 @@
 <body>
 <main>
   <p id="status">Disconnected</p>
-  <h1>Clinical speech, kept local.</h1>
+  <h1>Speech transcription</h1>
   <p>Allow microphone access to stream 16 kHz mono PCM locally to the ASR service. Audio is not uploaded anywhere.</p>
   <div class="toolbar">
-    <button id="start">Start microphone</button>
-    <button id="demo" class="secondary" disabled>Use demo phrase</button>
+    <button id="loadModel">Load model</button>
+    <button id="start" disabled>Start recording</button>
+    <!-- <button id="demo" class="secondary" disabled>Use demo phrase</button> -->
     <button id="finish" disabled>Finalize</button>
   </div>
   <section id="activity" aria-live="polite">
@@ -50,9 +51,11 @@
   let source;
   let loadingTimer;
   let loadingStarted;
+  let modelReady = false;
   const status = document.querySelector('#status');
   const transcript = document.querySelector('#transcript');
   const events = document.querySelector('#events');
+  const loadModel = document.querySelector('#loadModel');
   const start = document.querySelector('#start');
   const demo = document.querySelector('#demo');
   const finish = document.querySelector('#finish');
@@ -106,15 +109,52 @@
     }, 250);
   }
 
-  async function connect(useMicrophone) {
+  async function connect() {
     socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/v1/transcribe/stream`);
     socket.binaryType = 'arraybuffer';
-    socket.onopen = async () => {
-      status.textContent = useMicrophone ? 'Requesting microphone...' : 'Connected';
-      demo.disabled = false;
-      finish.disabled = false;
+    socket.onopen = () => {
+      status.textContent = 'Connected; loading model...';
+      loadModel.disabled = true;
+    };
+    socket.onmessage = ({ data }) => {
+      const event = JSON.parse(data);
+      events.textContent += `${event.type}\n`;
+      events.scrollTop = events.scrollHeight;
+      if (event.type === 'session_started') { status.textContent = 'Session connected'; backendState.textContent = 'Connected'; }
+      if (event.type === 'model_loading') { status.textContent = 'Loading local Parakeet model...'; modelState.textContent = 'Loading'; startLoadingTimer(); }
+      if (event.type === 'model_ready') {
+        stopLoadingTimer();
+        modelReady = true;
+        modelState.textContent = 'Ready';
+        status.textContent = 'Model ready; start recording when ready';
+        loadModel.disabled = true;
+        start.disabled = false;
+        demo.disabled = false;
+        finish.disabled = false;
+      }
+      if (event.type === 'audio_received') { audioState.textContent = event.text; inferenceState.textContent = 'Receiving audio'; }
+      if (event.type === 'partial_transcript') transcript.textContent = event.text || 'Listening...';
+      if (event.type === 'final_transcript') transcript.textContent = event.text || 'No transcript';
+      if (event.type === 'partial_transcript') { inferenceState.textContent = `Partial at ${new Date().toLocaleTimeString()}`; }
+      if (event.type === 'final_transcript') { inferenceState.textContent = 'Final transcript ready'; }
+      if (event.type === 'error') { stopLoadingTimer(); modelState.textContent = 'Failed'; status.textContent = `ASR error: ${event.error}`; }
+      if (event.type === 'session_finished') { status.textContent = 'Finished'; stopMicrophone(); demo.disabled = true; finish.disabled = true; }
+    };
+    socket.onerror = () => { status.textContent = 'WebSocket connection error'; };
+    socket.onclose = () => {
+      stopMicrophone();
+      modelReady = false;
+      loadModel.disabled = false;
       start.disabled = true;
-      if (!useMicrophone) return;
+      demo.disabled = true;
+      finish.disabled = true;
+    };
+  }
+
+  async function startRecording() {
+    if (!modelReady || !socket || socket.readyState !== WebSocket.OPEN) return;
+    status.textContent = 'Requesting microphone...';
+    start.disabled = true;
       try {
         microphone = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
         audioContext = new AudioContext();
@@ -131,28 +171,11 @@
       } catch (error) {
         status.textContent = `Microphone error: ${error.message}`;
         stopMicrophone();
-        socket.close();
+        start.disabled = false;
       }
-    };
-    socket.onmessage = ({ data }) => {
-      const event = JSON.parse(data);
-      events.textContent += `${event.type}\n`;
-      events.scrollTop = events.scrollHeight;
-      if (event.type === 'session_started') { status.textContent = 'Session connected'; backendState.textContent = 'Connected'; }
-      if (event.type === 'model_loading') { status.textContent = 'Loading local Parakeet model...'; modelState.textContent = 'Loading'; startLoadingTimer(); }
-      if (event.type === 'model_ready') { stopLoadingTimer(); modelState.textContent = 'Ready'; status.textContent = useMicrophone ? 'Model ready; starting microphone...' : 'Model ready'; }
-      if (event.type === 'audio_received') { audioState.textContent = event.text; inferenceState.textContent = 'Receiving audio'; }
-      if (event.type === 'partial_transcript') transcript.textContent = event.text || 'Listening...';
-      if (event.type === 'final_transcript') transcript.textContent = event.text || 'No transcript';
-      if (event.type === 'partial_transcript') { inferenceState.textContent = `Partial at ${new Date().toLocaleTimeString()}`; }
-      if (event.type === 'final_transcript') { inferenceState.textContent = 'Final transcript ready'; }
-      if (event.type === 'error') { stopLoadingTimer(); modelState.textContent = 'Failed'; status.textContent = `ASR error: ${event.error}`; }
-      if (event.type === 'session_finished') { status.textContent = 'Finished'; stopMicrophone(); demo.disabled = true; finish.disabled = true; }
-    };
-    socket.onerror = () => { status.textContent = 'WebSocket connection error'; };
-    socket.onclose = () => { stopMicrophone(); start.disabled = false; demo.disabled = true; finish.disabled = true; };
   }
-  start.onclick = () => connect(true);
+  loadModel.onclick = () => connect();
+  start.onclick = startRecording;
   demo.onclick = () => socket.send(JSON.stringify({ type: 'mock_text', text: 'Patient takes ram a pro five milligrams once daily' }));
   finish.onclick = () => { stopMicrophone(); if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'finalize' })); };
 </script>
