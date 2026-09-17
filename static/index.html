@@ -48,7 +48,6 @@
   let audioContext;
   let processor;
   let source;
-  let lastPartialText = '';
   let loadingTimer;
   let loadingStarted;
   const status = document.querySelector('#status');
@@ -107,31 +106,7 @@
     }, 250);
   }
 
-  function appendTranscript(text) {
-    if (!text) return;
-    if (!lastPartialText) {
-      transcript.textContent = text;
-      lastPartialText = text;
-      return;
-    }
-    if (text.startsWith(lastPartialText)) {
-      transcript.textContent += text.slice(lastPartialText.length);
-    } else {
-      let overlap = 0;
-      const maximumOverlap = Math.min(lastPartialText.length, text.length);
-      for (let size = maximumOverlap; size > 0; size--) {
-        if (lastPartialText.endsWith(text.slice(0, size))) {
-          overlap = size;
-          break;
-        }
-      }
-      transcript.textContent += `${overlap ? '' : ' '}${text.slice(overlap)}`;
-    }
-    lastPartialText = text;
-  }
-
   async function connect(useMicrophone) {
-    lastPartialText = '';
     socket = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/v1/transcribe/stream`);
     socket.binaryType = 'arraybuffer';
     socket.onopen = async () => {
@@ -167,7 +142,8 @@
       if (event.type === 'model_loading') { status.textContent = 'Loading local Parakeet model...'; modelState.textContent = 'Loading'; startLoadingTimer(); }
       if (event.type === 'model_ready') { stopLoadingTimer(); modelState.textContent = 'Ready'; status.textContent = useMicrophone ? 'Model ready; starting microphone...' : 'Model ready'; }
       if (event.type === 'audio_received') { audioState.textContent = event.text; inferenceState.textContent = 'Receiving audio'; }
-      if (event.type === 'partial_transcript' || event.type === 'final_transcript') appendTranscript(event.text);
+      if (event.type === 'partial_transcript') transcript.textContent = event.text || 'Listening...';
+      if (event.type === 'final_transcript') transcript.textContent = event.text || 'No transcript';
       if (event.type === 'partial_transcript') { inferenceState.textContent = `Partial at ${new Date().toLocaleTimeString()}`; }
       if (event.type === 'final_transcript') { inferenceState.textContent = 'Final transcript ready'; }
       if (event.type === 'error') { stopLoadingTimer(); modelState.textContent = 'Failed'; status.textContent = `ASR error: ${event.error}`; }

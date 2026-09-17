@@ -78,15 +78,14 @@ class ParakeetStreamingASR(StreamingASR):
 
     _model = None
     _model_lock = threading.Lock()
-    max_audio_bytes = 5 * 16000 * 2
 
     def __init__(self, model_name: str, model_path: str = "", device: str = "auto") -> None:
         self.model_name = model_name
         self.model_path = model_path
         self.device = device
         self.audio = bytearray()
-        self.min_inference_bytes = 16000 * 2
-        self.pending_audio_bytes = 0
+        self.min_inference_bytes = 16000
+        self.last_inference_size = 0
 
     async def start_session(self) -> None:
         if self.__class__._model is None:
@@ -100,14 +99,11 @@ class ParakeetStreamingASR(StreamingASR):
                             f"model via ASR_MODEL_PATH, or allow the first download: {exc}"
                         ) from exc
         self.audio.clear()
-        self.pending_audio_bytes = 0
+        self.last_inference_size = 0
 
     async def push_audio(self, audio_chunk: bytes) -> str | None:
         self.audio.extend(audio_chunk)
-        self.pending_audio_bytes += len(audio_chunk)
-        if len(self.audio) > self.max_audio_bytes:
-            del self.audio[:-self.max_audio_bytes]
-        if self.pending_audio_bytes >= self.min_inference_bytes:
+        if len(self.audio) - self.last_inference_size >= self.min_inference_bytes:
             return self._transcribe()
         return None
 
@@ -119,12 +115,12 @@ class ParakeetStreamingASR(StreamingASR):
 
     async def reset(self) -> None:
         self.audio.clear()
-        self.pending_audio_bytes = 0
+        self.last_inference_size = 0
 
     def _transcribe(self) -> str:
         if not self.audio:
             return ""
-        self.pending_audio_bytes = 0
+        self.last_inference_size = len(self.audio)
         import numpy as np
         samples = struct.unpack("<%dh" % (len(self.audio) // 2), self.audio[: len(self.audio) // 2 * 2])
         waveform = np.asarray(samples, dtype=np.float32) / 32768.0
